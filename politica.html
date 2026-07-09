@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Política — Dashboard Catalunya</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/components.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+</head>
+<body>
+
+<main class="main-content">
+  <div class="page-header">
+    <p class="eyebrow">Catalunya · Parlament · 1980–2024</p>
+    <h1 class="page-title">Política</h1>
+    <p class="page-desc">Distribució d'escons al Parlament de Catalunya. Dades de totes les eleccions des de 1980.</p>
+  </div>
+
+  <div id="content">
+
+    <div class="section">
+      <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <h2 id="election-title">Resultats electorals</h2>
+        <div class="filter-group">
+          <label>Elecció</label>
+          <select id="sel-eleccio" onchange="renderElection(this.value)"></select>
+        </div>
+      </div>
+
+      <div id="kpi-escons" class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(180px,1fr));margin-top:16px;"></div>
+
+      <div class="chart-wrap" style="margin-top:12px;">
+        <div id="chart-escons" style="height:380px;"></div>
+        <p class="chart-source">Font: Generalitat de Catalunya · Departament de la Presidència</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Evolució 1980–2024</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-evolution" style="height:380px;"></div>
+        <p class="chart-source">Escons obtinguts per cada família política a cada convocatòria. Línia discontinua: majoria absoluta (68 escons).</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Enquestes — CEO BOP 3/2025</h2></div>
+      <div id="kpi-enquestes" class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));margin-top:16px;"></div>
+      <div class="chart-wrap" style="margin-top:12px;">
+        <div id="chart-enquestes" style="height:320px;"></div>
+        <p class="chart-source">Font: CEO Baròmetre de l'Opinió Pública 3/2025 (oct–nov 2025, n=2.000) · Simulació d'escons aproximada. Dades hardcodejades — actualitzar cada trimestre.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header" style="display:flex;align-items:center;justify-content:space-between;">
+        <h2>Mapa — Resultat per municipi</h2>
+        <div class="filter-group">
+          <label>Elecció</label>
+          <select id="sel-mapa-eleccio" onchange="initMap(this.value)"></select>
+        </div>
+      </div>
+      <div id="map-loading" class="loading-box" style="display:none;">
+        <div class="spinner"></div><p>Carregant dades i mapa…</p>
+        <p style="font-size:12px;color:var(--ink-faint);margin-top:4px;">Primera càrrega: ~5s · Càrregues posteriors: instantànies (caché)</p>
+      </div>
+      <div id="map-error" class="error-box" style="display:none;"></div>
+      <div id="map-municipis" style="height:520px;border-radius:9px;overflow:hidden;display:none;"></div>
+      <p id="map-legend" class="chart-source" style="display:none;margin-top:8px;"></p>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Parlament de Catalunya</h2></div>
+      <div class="cards-grid" style="grid-template-columns:repeat(auto-fill,minmax(220px,1fr));">
+        <div class="card accent-teal">
+          <div class="card-icon">🏛️</div>
+          <h3>135 diputats</h3>
+          <p>El Parlament de Catalunya té 135 diputats elegits per circumscripcions provincials.</p>
+        </div>
+        <div class="card accent-burnt">
+          <div class="card-icon">🗳️</div>
+          <h3>4 circumscripcions</h3>
+          <p>Barcelona, Girona, Lleida i Tarragona. Barcelona aporta la majoria dels escons.</p>
+        </div>
+        <div class="card accent-olive">
+          <div class="card-icon">📅</div>
+          <h3>Cada 4 anys</h3>
+          <p>Les eleccions es convoquen cada 4 anys, o anticipadament si el President dissol la cambra.</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<button class="btn-print" onclick="window.print()">Imprimir / PDF</button>
+
+<script src="js/cache.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/api.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/topojson-client@3/dist/topojson-client.min.js"></script>
+<script>
+renderNav('politica');
+
+/* ── Hardcoded election data (seats / escons) ─────────────────────── */
+var ELECTIONS = [
+  {
+    id: '2024', label: 'Eleccions 2024 (12 mai)',
+    results: [
+      { sigles: 'PSC',    escons: 42, color: '#E63946' },
+      { sigles: 'Junts',  escons: 35, color: '#003087' },
+      { sigles: 'ERC',    escons: 20, color: '#F4A012' },
+      { sigles: 'PP',     escons: 15, color: '#0065BD' },
+      { sigles: 'AC',     escons:  7, color: '#8B0000' },
+      { sigles: 'Vox',    escons:  6, color: '#62BC2E' },
+      { sigles: 'Comuns', escons:  6, color: '#C4007A' },
+      { sigles: 'CUP',    escons:  4, color: '#c9a800' },
+    ]
+  },
+  {
+    id: '2021', label: 'Eleccions 2021 (14 feb)',
+    results: [
+      { sigles: 'PSC',    escons: 33, color: '#E63946' },
+      { sigles: 'ERC',    escons: 33, color: '#F4A012' },
+      { sigles: 'JxCAT',  escons: 32, color: '#003087' },
+      { sigles: 'Vox',    escons: 11, color: '#62BC2E' },
+      { sigles: 'CUP',    escons:  9, color: '#c9a800' },
+      { sigles: 'Comuns', escons:  8, color: '#C4007A' },
+      { sigles: "C's",    escons:  6, color: '#F76F1B' },
+      { sigles: 'PP',     escons:  3, color: '#0065BD' },
+    ]
+  },
+  {
+    id: '2017', label: 'Eleccions 2017 (21 des)',
+    results: [
+      { sigles: "C's",    escons: 36, color: '#F76F1B' },
+      { sigles: 'JxCAT',  escons: 34, color: '#003087' },
+      { sigles: 'ERC',    escons: 32, color: '#F4A012' },
+      { sigles: 'PSC',    escons: 17, color: '#E63946' },
+      { sigles: 'Comuns', escons:  8, color: '#C4007A' },
+      { sigles: 'CUP',    escons:  4, color: '#c9a800' },
+      { sigles: 'PP',     escons:  4, color: '#0065BD' },
+    ]
+  },
+  {
+    id: '2015', label: 'Eleccions 2015 (27 set)',
+    results: [
+      { sigles: 'JxSí',   escons: 62, color: '#003087' },
+      { sigles: "C's",    escons: 25, color: '#F76F1B' },
+      { sigles: 'PSC',    escons: 16, color: '#E63946' },
+      { sigles: 'CSQEP',  escons: 11, color: '#C4007A' },
+      { sigles: 'PP',     escons: 11, color: '#0065BD' },
+      { sigles: 'CUP',    escons: 10, color: '#c9a800' },
+    ]
+  },
+  {
+    id: '2012', label: 'Eleccions 2012 (25 nov)',
+    results: [
+      { sigles: 'CiU',    escons: 50, color: '#18375F' },
+      { sigles: 'ERC',    escons: 21, color: '#F4A012' },
+      { sigles: 'PSC',    escons: 20, color: '#E63946' },
+      { sigles: 'PP',     escons: 19, color: '#0065BD' },
+      { sigles: 'ICV',    escons: 13, color: '#C4007A' },
+      { sigles: "C's",    escons:  9, color: '#F76F1B' },
+      { sigles: 'CUP',    escons:  3, color: '#c9a800' },
+    ]
+  },
+  {
+    id: '2010', label: 'Eleccions 2010 (28 nov)',
+    results: [
+      { sigles: 'CiU',    escons: 62, color: '#18375F' },
+      { sigles: 'PSC',    escons: 28, color: '#E63946' },
+      { sigles: 'PP',     escons: 18, color: '#0065BD' },
+      { sigles: 'ICV',    escons: 10, color: '#C4007A' },
+      { sigles: 'ERC',    escons: 10, color: '#F4A012' },
+      { sigles: 'SI',     escons:  4, color: '#888888' },
+      { sigles: "C's",    escons:  3, color: '#F76F1B' },
+    ]
+  },
+  {
+    id: '2006', label: 'Eleccions 2006 (1 nov)',
+    results: [
+      { sigles: 'CiU',    escons: 48, color: '#18375F' },
+      { sigles: 'PSC',    escons: 37, color: '#E63946' },
+      { sigles: 'ERC',    escons: 21, color: '#F4A012' },
+      { sigles: 'PP',     escons: 14, color: '#0065BD' },
+      { sigles: 'ICV',    escons: 12, color: '#C4007A' },
+      { sigles: "C's",    escons:  3, color: '#F76F1B' },
+    ]
+  },
+  {
+    id: '2003', label: 'Eleccions 2003 (16 nov)',
+    results: [
+      { sigles: 'CiU',    escons: 46, color: '#18375F' },
+      { sigles: 'PSC',    escons: 42, color: '#E63946' },
+      { sigles: 'ERC',    escons: 23, color: '#F4A012' },
+      { sigles: 'PP',     escons: 15, color: '#0065BD' },
+      { sigles: 'ICV',    escons:  9, color: '#C4007A' },
+    ]
+  },
+  {
+    id: '1999', label: 'Eleccions 1999 (17 oct)',
+    results: [
+      { sigles: 'CiU',    escons: 56, color: '#18375F' },
+      { sigles: 'PSC',    escons: 52, color: '#E63946' },
+      { sigles: 'PP',     escons: 12, color: '#0065BD' },
+      { sigles: 'ERC',    escons: 12, color: '#F4A012' },
+      { sigles: 'ICV',    escons:  3, color: '#C4007A' },
+    ]
+  },
+  {
+    id: '1995', label: 'Eleccions 1995 (19 nov)',
+    results: [
+      { sigles: 'CiU',    escons: 60, color: '#18375F' },
+      { sigles: 'PSC',    escons: 34, color: '#E63946' },
+      { sigles: 'PP',     escons: 17, color: '#0065BD' },
+      { sigles: 'ERC',    escons: 13, color: '#F4A012' },
+      { sigles: 'ICV',    escons: 11, color: '#C4007A' },
+    ]
+  },
+  {
+    id: '1992', label: 'Eleccions 1992 (29 mar)',
+    results: [
+      { sigles: 'CiU',    escons: 70, color: '#18375F' },
+      { sigles: 'PSC',    escons: 40, color: '#E63946' },
+      { sigles: 'ERC',    escons: 11, color: '#F4A012' },
+      { sigles: 'IC',     escons:  7, color: '#C4007A' },
+      { sigles: 'PP',     escons:  7, color: '#0065BD' },
+    ]
+  },
+  {
+    id: '1988', label: 'Eleccions 1988 (29 mai)',
+    results: [
+      { sigles: 'CiU',    escons: 69, color: '#18375F' },
+      { sigles: 'PSC',    escons: 42, color: '#E63946' },
+      { sigles: 'IC',     escons:  9, color: '#C4007A' },
+      { sigles: 'ERC',    escons:  6, color: '#F4A012' },
+      { sigles: 'PP',     escons:  6, color: '#0065BD' },
+      { sigles: 'CDS',    escons:  3, color: '#888888' },
+    ]
+  },
+  {
+    id: '1984', label: 'Eleccions 1984 (29 abr)',
+    results: [
+      { sigles: 'CiU',    escons: 72, color: '#18375F' },
+      { sigles: 'PSC',    escons: 41, color: '#E63946' },
+      { sigles: 'AP',     escons: 11, color: '#0065BD' },
+      { sigles: 'PSUC',   escons:  6, color: '#C4007A' },
+      { sigles: 'ERC',    escons:  5, color: '#F4A012' },
+    ]
+  },
+  {
+    id: '1980', label: 'Eleccions 1980 (20 mar)',
+    results: [
+      { sigles: 'CiU',    escons: 43, color: '#18375F' },
+      { sigles: 'PSC',    escons: 33, color: '#E63946' },
+      { sigles: 'PSUC',   escons: 25, color: '#C4007A' },
+      { sigles: 'UCD',    escons: 18, color: '#888888' },
+      { sigles: 'ERC',    escons: 14, color: '#F4A012' },
+      { sigles: 'CC',     escons:  2, color: '#BBBBBB' },
+    ]
+  },
+];
+
+/* ── Normalize party names to families for evolution chart ─────────── */
+var FAMILY_MAP = {
+  'CiU': 'CiU/Junts', 'JxSí': 'CiU/Junts', 'JxCAT': 'CiU/Junts', 'Junts': 'CiU/Junts',
+  'PSUC': 'ICV/Comuns', 'IC': 'ICV/Comuns', 'ICV': 'ICV/Comuns', 'CSQEP': 'ICV/Comuns', 'Comuns': 'ICV/Comuns',
+  'AP': 'PP',
+};
+
+var FAMILY_COLORS = {
+  'PSC':        '#E63946',
+  'CiU/Junts':  '#18375F',
+  'ERC':        '#F4A012',
+  'PP':         '#0065BD',
+  'ICV/Comuns': '#C4007A',
+  "C's":        '#F76F1B',
+  'CUP':        '#c9a800',
+  'Vox':        '#62BC2E',
+  'Altres':     '#D6CFBC',
+};
+
+var MAIN_FAMILIES = ['CiU/Junts', 'PSC', 'ERC', 'PP', 'ICV/Comuns', "C's", 'CUP', 'Vox'];
+
+/* ── Render selected election bar chart ────────────────────────────── */
+function renderElection(id) {
+  var elec = ELECTIONS.find(function(e) { return e.id === id; });
+  if (!elec) return;
+
+  document.getElementById('election-title').textContent = elec.label;
+
+  var sorted = elec.results.slice().sort(function(a, b) { return a.escons - b.escons; });
+  var winner = elec.results.slice().sort(function(a, b) { return b.escons - a.escons; })[0];
+  var hasMajority = winner.escons >= 68;
+
+  document.getElementById('kpi-escons').innerHTML =
+    kpi('Guanyador', winner.sigles, winner.escons + ' escons') +
+    kpi('Majoria absoluta', '68 escons', hasMajority ? (winner.sigles + ' en té prou') : 'Cap candidatura') +
+    kpi('Total escons', '135', 'Parlament de Catalunya');
+
+  plotBar('chart-escons', [{
+    y: sorted.map(function(r) { return r.sigles; }),
+    x: sorted.map(function(r) { return r.escons; }),
+    type: 'bar', orientation: 'h',
+    marker: { color: sorted.map(function(r) { return r.color; }) },
+    hovertemplate: '<b>%{y}</b>: %{x} escons<extra></extra>',
+    text: sorted.map(function(r) { return r.escons; }),
+    textposition: 'outside',
+  }], {
+    hovermode: 'closest',
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Escons', range: [0, 80] },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', automargin: true },
+    margin: { t: 20, b: 50, l: 70, r: 40 },
+    shapes: [{
+      type: 'line', x0: 68, x1: 68, y0: -0.5, y1: sorted.length - 0.5,
+      line: { color: '#B4541E', width: 1.5, dash: 'dash' }
+    }],
+    annotations: [{
+      x: 68, y: sorted.length - 0.5, xanchor: 'left', yanchor: 'top',
+      text: 'Majoria abs.',
+      font: { size: 11, color: '#B4541E' },
+      showarrow: false,
+      bgcolor: 'rgba(244,240,230,0.85)',
+      borderpad: 3
+    }]
+  });
+}
+
+/* ── Render evolution stacked bar chart ────────────────────────────── */
+function renderEvolutionChart() {
+  var years = ELECTIONS.map(function(e) { return e.id; }).reverse();
+
+  var traces = MAIN_FAMILIES.map(function(family) {
+    return {
+      name: family,
+      x: years,
+      y: years.map(function(yr) {
+        var elec = ELECTIONS.find(function(e) { return e.id === yr; });
+        return elec.results.reduce(function(sum, r) {
+          var f = FAMILY_MAP[r.sigles] || r.sigles;
+          return f === family ? sum + r.escons : sum;
+        }, 0);
+      }),
+      type: 'bar',
+      marker: { color: FAMILY_COLORS[family] },
+      hovertemplate: '<b>' + family + '</b>: %{y} escons<extra></extra>'
+    };
+  });
+
+  var altresTrace = {
+    name: 'Altres',
+    x: years,
+    y: years.map(function(yr) {
+      var elec = ELECTIONS.find(function(e) { return e.id === yr; });
+      return elec.results.reduce(function(sum, r) {
+        var f = FAMILY_MAP[r.sigles] || r.sigles;
+        return MAIN_FAMILIES.indexOf(f) === -1 ? sum + r.escons : sum;
+      }, 0);
+    }),
+    type: 'bar',
+    marker: { color: FAMILY_COLORS['Altres'] },
+    hovertemplate: '<b>Altres</b>: %{y} escons<extra></extra>'
+  };
+  traces.push(altresTrace);
+
+  plotBar('chart-evolution', traces, {
+    barmode: 'stack',
+    hovermode: 'closest',
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any', type: 'category' },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Escons', range: [0, 140] },
+    margin: { t: 20, b: 50, l: 55, r: 20 },
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 },
+    shapes: [{
+      type: 'line', x0: -0.5, x1: years.length - 0.5, y0: 68, y1: 68,
+      line: { color: '#B4541E', width: 1.5, dash: 'dash' }
+    }]
+  });
+}
+
+function kpi(label, value, sub) {
+  return '<div class="kpi-card"><div class="kpi-label">' + label + '</div>'
+    + '<div class="kpi-value" style="font-size:20px;">' + value + '</div>'
+    + (sub ? '<div class="kpi-sub">' + sub + '</div>' : '') + '</div>';
+}
+
+/* ── Enquestes: CEO BOP 3/2025 seat simulation ─────────────────────── */
+var BOP_DATA = [
+  { sigles: 'PSC',    escons: 36, color: '#E63946' },
+  { sigles: 'ERC',    escons: 21, color: '#F4A012' },
+  { sigles: 'Junts',  escons: 20, color: '#003087' },
+  { sigles: 'AC',     escons: 20, color: '#8B0000' },
+  { sigles: 'Vox',    escons: 14, color: '#62BC2E' },
+  { sigles: 'PP',     escons: 13, color: '#0065BD' },
+  { sigles: 'Comuns', escons:  6, color: '#C4007A' },
+  { sigles: 'CUP',    escons:  4, color: '#c9a800' },
+  { sigles: 'Altres', escons:  1, color: '#D6CFBC' },
+];
+
+function renderEnquestesChart() {
+  var sorted = BOP_DATA.slice().sort(function(a, b) { return a.escons - b.escons; });
+  var leader = BOP_DATA.reduce(function(a, b) { return a.escons > b.escons ? a : b; });
+
+  document.getElementById('kpi-enquestes').innerHTML =
+    kpi('Primer', leader.sigles, leader.escons + ' escons estimats') +
+    kpi('Majoria absoluta', '68 escons', 'Cap partit en tindria') +
+    kpi('Onada', 'BOP 3/2025', 'oct–nov 2025 · n=2.000');
+
+  plotBar('chart-enquestes', [{
+    y: sorted.map(function(r) { return r.sigles; }),
+    x: sorted.map(function(r) { return r.escons; }),
+    type: 'bar', orientation: 'h',
+    marker: { color: sorted.map(function(r) { return r.color; }) },
+    hovertemplate: '<b>%{y}</b>: %{x} escons estimats<extra></extra>',
+    text: sorted.map(function(r) { return r.escons; }),
+    textposition: 'outside',
+  }], {
+    hovermode: 'closest',
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Escons estimats', range: [0, 50] },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', automargin: true },
+    margin: { t: 20, b: 50, l: 70, r: 40 },
+    shapes: [{
+      type: 'line', x0: 68, x1: 68, y0: -0.5, y1: BOP_DATA.length - 0.5,
+      line: { color: '#B4541E', width: 1.5, dash: 'dash' }
+    }],
+    annotations: [{
+      x: 68, y: BOP_DATA.length - 0.5, xanchor: 'left', yanchor: 'top',
+      text: 'Majoria abs.',
+      font: { size: 11, color: '#B4541E' },
+      showarrow: false,
+      bgcolor: 'rgba(244,240,230,0.85)',
+      borderpad: 3
+    }]
+  });
+}
+
+/* ── Mapa: Autonòmiques per municipi (via API) ─────────────────────── */
+var MAP_ELECTIONS = [
+  { id: 'A20241', label: '2024 (12 mai)' },
+  { id: 'A20211', label: '2021 (14 feb)' },
+  { id: 'A20171', label: '2017 (21 des)' },
+  { id: 'A20151', label: '2015 (27 set)' },
+  { id: 'A20121', label: '2012 (25 nov)' },
+  { id: 'A20101', label: '2010 (28 nov)' },
+];
+
+var MAP_PARTY_COLORS = {
+  /* Claus ordenades de més llarga a més curta per evitar falsos positius en indexOf */
+  'CIUTADANS': '#F76F1B',
+  'CATCOMUNS': '#C4007A',
+  'EN COM':    '#C4007A',
+  'ICVEUIA':   '#C4007A',
+  'ALIAN':     '#8B0000',
+  'JXCAT':     '#003087',
+  'JUNTS':     '#003087',
+  'JXSI':      '#3AB6A5',
+  'CIU':       '#18375F',
+  'PSC':       '#E63946',
+  'ERC':       '#F4A012',
+  'ICV':       '#C4007A',
+  'PPC':       '#0065BD',
+  "C'S":       '#F76F1B',
+  'CUP':       '#c9a800',
+  'VOX':       '#62BC2E',
+  'PP':        '#0065BD',
+  'AC':        '#8B0000',
+};
+
+/* Etiquetes canòniques per color (per a la llegenda) */
+var MAP_COLOR_LABEL = {
+  '#E63946': 'PSC',   '#F4A012': 'ERC',     '#18375F': 'CiU',
+  '#003087': 'CiU / JxCAT / Junts',         '#3AB6A5': 'Junts pel Sí (2015)',
+  '#0065BD': 'PP',
+  '#F76F1B': "C's",   '#62BC2E': 'Vox',     '#c9a800': 'CUP',
+  '#C4007A': 'ICV / Comuns',                '#8B0000': 'Aliança Cat.',
+};
+
+function getMapPartyColor(sigles) {
+  if (!sigles) return '#D6CFBC';
+  var up = sigles.toUpperCase()
+    .replace(/['']/g, "'")
+    .normalize('NFD').replace(/[̀-ͯ]/g, ''); // elimina accents: JxSí → JXSI
+  var keys = Object.keys(MAP_PARTY_COLORS).sort(function(a, b) { return b.length - a.length; });
+  for (var i = 0; i < keys.length; i++) {
+    if (up.indexOf(keys[i]) !== -1) return MAP_PARTY_COLORS[keys[i]];
+  }
+  return '#D6CFBC';
+}
+
+function normMuni(s) {
+  return (s || '').toLowerCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/^(el |la |l'|els |les |lo )/i, '')
+    .trim();
+}
+
+function buildWinnersFromAPI(rows) {
+  var by = {};
+  rows.forEach(function(r) {
+    var nom  = r.territori_nom || '';
+    var sig  = r.candidatura_sigles || '';
+    var vots = parseFloat(r.total_vots) || 0;
+    var key  = normMuni(nom);
+    if (!key || !sig) return;
+    if (!by[key]) by[key] = {};
+    by[key][sig] = (by[key][sig] || 0) + vots;
+  });
+  var winners = {};
+  Object.keys(by).forEach(function(key) {
+    var parties = by[key];
+    winners[key] = Object.keys(parties).reduce(function(a, b) {
+      return parties[a] >= parties[b] ? a : b;
+    });
+  });
+  return winners;
+}
+
+var leafletMap = null;
+
+async function initMap(eleccioId) {
+  eleccioId = eleccioId || MAP_ELECTIONS[0].id;
+  document.getElementById('map-error').style.display = 'none';
+  document.getElementById('map-municipis').style.display = 'none';
+  document.getElementById('map-legend').style.display = 'none';
+  document.getElementById('map-loading').style.display = '';
+
+  try {
+    var results = await Promise.all([
+      API.votsPerMunicipi(eleccioId),
+      API.topoMunicipis()
+    ]);
+    var winners  = buildWinnersFromAPI(results[0].data);
+    var topology = results[1].data;
+
+    document.getElementById('map-loading').style.display = 'none';
+    document.getElementById('map-municipis').style.display = '';
+
+    if (leafletMap) { leafletMap.remove(); leafletMap = null; }
+    leafletMap = L.map('map-municipis', { zoomControl: true, attributionControl: false });
+    leafletMap.invalidateSize();
+
+    /* Tile layer: CartoDB positron (fons geogràfic neutre amb contorns de països) */
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 19
+    }).addTo(leafletMap);
+
+    var objKey = Object.keys(topology.objects)[0];
+    var geojson = topojson.feature(topology, topology.objects[objKey]);
+
+    /* Comptem municipis per color per a la llegenda */
+    var colorStats = {};
+    var altresCount = 0;
+
+    var geoLayer = L.geoJSON(geojson, {
+      style: function(feat) {
+        var key    = normMuni(feat.properties.nom || '');
+        var winner = winners[key] || '';
+        var color  = getMapPartyColor(winner);
+        if (color === '#D6CFBC') { altresCount++; }
+        else { colorStats[color] = (colorStats[color] || 0) + 1; }
+        return { fillColor: color, fillOpacity: 0.78, weight: 0.5, color: '#fff' };
+      },
+      onEachFeature: function(feat, layer) {
+        var nom    = feat.properties.nom || '';
+        var winner = winners[normMuni(nom)] || '—';
+        layer.bindTooltip('<b>' + nom + '</b><br>' + winner, { sticky: true });
+      }
+    }).addTo(leafletMap);
+
+    /* Zoom fix centrat a Catalunya */
+    leafletMap.setView([41.73, 1.73], 8);
+
+    /* Llegenda: partits coneguts ordenats per nombre de municipis + "Altres" sempre al final */
+    var elecLabel = (MAP_ELECTIONS.find(function(e) { return e.id === eleccioId; }) || {}).label || eleccioId;
+    var sortedColors = Object.keys(colorStats).sort(function(a, b) { return colorStats[b] - colorStats[a]; });
+    var legendHtml = sortedColors.map(function(color) {
+      var label = MAP_COLOR_LABEL[color] || color;
+      return '<span style="margin-right:12px;white-space:nowrap;">'
+        + '<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:'
+        + color + ';margin-right:4px;vertical-align:middle;"></span>'
+        + label + ' <span style="color:var(--ink-faint);font-size:11px;">(' + colorStats[color] + ')</span></span>';
+    }).join('');
+    if (altresCount > 0) {
+      legendHtml += '<span style="margin-right:12px;white-space:nowrap;">'
+        + '<span style="display:inline-block;width:12px;height:12px;border-radius:2px;background:#D6CFBC;'
+        + 'border:1px solid #9E9E9E;margin-right:4px;vertical-align:middle;"></span>'
+        + 'Altres <span style="color:var(--ink-faint);font-size:11px;">(' + altresCount + ')</span></span>';
+    }
+    var legEl = document.getElementById('map-legend');
+    legEl.innerHTML = '<div style="margin-bottom:4px;">' + legendHtml + '</div>'
+      + 'Font: Dades Obertes Generalitat · Parlament Catalunya ' + elecLabel
+      + ' · Mapa: CartoDB / OpenStreetMap';
+    legEl.style.display = '';
+
+  } catch(e) {
+    document.getElementById('map-loading').style.display = 'none';
+    var el = document.getElementById('map-error');
+    el.innerHTML = '<strong>Error carregant el mapa</strong><br>' + e.message
+      + '<br><br><button class="btn-refresh" onclick="initMap(\'' + eleccioId + '\')">Tornar a intentar</button>';
+    el.style.display = '';
+  }
+}
+
+/* ── Init ──────────────────────────────────────────────────────────── */
+(function init() {
+  var sel = document.getElementById('sel-eleccio');
+  ELECTIONS.forEach(function(e) {
+    var opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.label;
+    sel.appendChild(opt);
+  });
+
+  var selMapa = document.getElementById('sel-mapa-eleccio');
+  MAP_ELECTIONS.forEach(function(e) {
+    var opt = document.createElement('option');
+    opt.value = e.id;
+    opt.textContent = e.label;
+    selMapa.appendChild(opt);
+  });
+
+  renderElection(ELECTIONS[0].id);
+  renderEvolutionChart();
+  renderEnquestesChart();
+  initMap(MAP_ELECTIONS[0].id);
+})();
+</script>
+</body>
+</html>

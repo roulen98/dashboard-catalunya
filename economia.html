@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Economia — Dashboard Catalunya</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/components.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+
+<main class="main-content">
+  <div class="page-header">
+    <p class="eyebrow">Catalunya · Indicadors econòmics · Idescat</p>
+    <h1 class="page-title">Economia</h1>
+    <p class="page-desc">PIB, taxa d'atur i renda familiar disponible. Dades oficials d'Idescat.</p>
+  </div>
+
+  <div id="loading" class="loading-box">
+    <div class="spinner"></div>
+    <p>Carregant indicadors econòmics…</p>
+  </div>
+  <div id="error-box" class="error-box" style="display:none;"></div>
+
+  <div id="content" style="display:none;">
+
+    <div class="section">
+      <div class="section-header"><h2>Producte Interior Brut</h2></div>
+      <div id="kpi-pib" class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));"></div>
+      <div class="chart-wrap" style="margin-top:12px;">
+        <div id="chart-pib" style="height:320px;"></div>
+        <p class="chart-source">Font: Idescat · Comptabilitat Regional — Revisió 2024. Dades 2022–2024 provisionals.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Taxa d'atur</h2></div>
+      <div id="kpi-atur" class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));"></div>
+      <div class="chart-wrap" style="margin-top:12px;">
+        <div id="chart-atur" style="height:320px;"></div>
+        <p class="chart-source">Font: Idescat · Estimació mensual de la població activa de Catalunya.</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Renda familiar disponible bruta per habitant</h2></div>
+      <div id="kpi-rfdb" class="kpi-grid" style="grid-template-columns:repeat(auto-fill,minmax(200px,1fr));"></div>
+      <div class="chart-wrap" style="margin-top:12px;">
+        <div id="chart-rfdb" style="height:300px;"></div>
+        <p class="chart-source">Font: Idescat · Renda familiar disponible bruta — Revisió 2024. 2023 provisional.</p>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<button class="btn-print" onclick="window.print()">Imprimir / PDF</button>
+
+<script src="js/cache.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/api.js"></script>
+<script>
+renderNav('economia');
+
+/* ── PIB ── */
+async function loadPib() {
+  var result = await API.pib();
+  var rows = parseJsonStat(result.data);
+
+  // Filter for GDP in million euros (label contains 'milio' or code GDP_ME)
+  var pibRows = rows.filter(function(r) {
+    var v = Object.values(r).join(' ').toLowerCase();
+    return r._value !== null && (v.includes('milion') || v.includes('milio') || v.includes('_me') || v.includes('gdp_me') || v.includes('pib') && !v.includes('hab') && !v.includes('index'));
+  });
+
+  // If filter too aggressive, fall back to rows with numeric year keys
+  if (pibRows.length < 3) {
+    // Try showing all concepts and pick first
+    var concepts = [...new Set(rows.map(function(r) {
+      var keys = Object.keys(r).filter(function(k) { return k !== '_value'; });
+      return r[keys[keys.length - 1]]; // last dimension is usually CONCEPT
+    }))];
+    var firstConcept = concepts[0];
+    pibRows = rows.filter(function(r) {
+      var keys = Object.keys(r).filter(function(k) { return k !== '_value'; });
+      return r[keys[keys.length - 1]] === firstConcept && r._value !== null;
+    });
+  }
+
+  // Find year dimension
+  var yearKey = Object.keys(rows[0]).find(function(k) { return k !== '_value' && /year|any|YEAR|ANY/i.test(k); }) || 'YEAR';
+
+  pibRows = pibRows.filter(function(r) { return r._value !== null; })
+    .sort(function(a,b) { return String(a[yearKey]).localeCompare(String(b[yearKey])); });
+
+  var years  = pibRows.map(function(r) { return String(r[yearKey]); });
+  var values = pibRows.map(function(r) { return parseFloat(r._value); });
+
+  if (!years.length) { document.getElementById('chart-pib').innerHTML = '<p style="padding:20px;color:var(--ink-faint)">No s\'han trobat dades de PIB.</p>'; return; }
+
+  var latest = values[values.length - 1];
+  var prev   = values[values.length - 2];
+  var delta  = latest - prev;
+  var pct    = ((delta / prev) * 100).toFixed(1);
+
+  document.getElementById('kpi-pib').innerHTML =
+    kpiCard('PIB (' + years[years.length-1] + ')', fmt(latest) + ' M€', pct > 0 ? '+'+pct+'%' : pct+'%', pct > 0) +
+    kpiCard('PIB 10 anys enrere', fmt(values[values.length - Math.min(11,values.length)]) + ' M€', '', null);
+
+  plotArea('chart-pib', [{
+    x: years, y: values,
+    type: 'scatter', mode: 'lines+markers', fill: 'tozeroy',
+    line: { color: CHART_PALETTE.teal, width: 2.5 },
+    fillcolor: 'rgba(30,74,82,0.12)',
+    marker: { size: 5, color: CHART_PALETTE.teal },
+    hovertemplate: '%{x}: %{y:,.0f} M€<extra></extra>'
+  }], {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any' },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Milions d\'€', tickformat: ',.0f' }
+  });
+}
+
+/* ── ATUR ── */
+async function loadAtur() {
+  var result = await API.atur();
+  var rows = parseJsonStat(result.data);
+
+  // We want the unemployment rate rows — filter for "atur" or "unemployment"
+  var atRows = rows.filter(function(r) {
+    var v = Object.values(r).join(' ').toLowerCase();
+    return r._value !== null && (v.includes('atur') || v.includes('unemploy') || v.includes('desempl'));
+  });
+
+  if (atRows.length < 3) {
+    // Show all, pick first concept
+    var concepts = [...new Set(rows.map(function(r) {
+      var keys = Object.keys(r).filter(function(k) { return k !== '_value'; });
+      return r[keys[keys.length - 1]];
+    }))];
+    atRows = rows.filter(function(r) {
+      var keys = Object.keys(r).filter(function(k) { return k !== '_value'; });
+      return r[keys[keys.length - 1]] === concepts[0] && r._value !== null;
+    });
+  }
+
+  var monthKey = Object.keys(rows[0]).find(function(k) {
+    return k !== '_value' && /month|mes|MONTH|MES|semester|SEMESTER/i.test(k);
+  }) || Object.keys(rows[0])[0];
+
+  atRows = atRows.filter(function(r) { return r._value !== null; })
+    .sort(function(a,b) { return String(a[monthKey]).localeCompare(String(b[monthKey])); });
+
+  var months = atRows.map(function(r) { return String(r[monthKey]); });
+  var values = atRows.map(function(r) { return parseFloat(r._value); });
+
+  if (!months.length) { document.getElementById('chart-atur').innerHTML = '<p style="padding:20px;color:var(--ink-faint)">No s\'han trobat dades d\'atur.</p>'; return; }
+
+  var latest = values[values.length - 1];
+  var prev   = values[values.length - 13] || values[0];
+  var delta  = (latest - prev).toFixed(1);
+
+  document.getElementById('kpi-atur').innerHTML =
+    kpiCard('Taxa d\'atur (' + months[months.length-1] + ')', latest.toFixed(1) + '%', (delta > 0 ? '+' : '') + delta + ' pp (interanual)', delta <= 0) +
+    kpiCard('Màxim històric', Math.max.apply(null, values).toFixed(1) + '%', months[values.indexOf(Math.max.apply(null, values))], null);
+
+  plotLine('chart-atur', [{
+    x: months, y: values,
+    type: 'scatter', mode: 'lines',
+    line: { color: CHART_PALETTE.burnt, width: 2 },
+    hovertemplate: '%{x}: %{y:.1f}%<extra></extra>'
+  }], {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8' },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Taxa d\'atur (%)', ticksuffix: '%' }
+  });
+}
+
+/* ── RFDB ── */
+async function loadRfdb() {
+  var result = await API.rfdb();
+  var rows = parseJsonStat(result.data);
+
+  // Filter for per-habitant indicator
+  var rfRows = rows.filter(function(r) {
+    var v = Object.values(r).join(' ').toLowerCase();
+    return r._value !== null && (v.includes('hab') || v.includes('per c') || v.includes('inh') || v.includes('capital'));
+  });
+
+  if (rfRows.length < 2) {
+    rfRows = rows.filter(function(r) { return r._value !== null; });
+  }
+
+  var yearKey = Object.keys(rows[0]).find(function(k) {
+    return k !== '_value' && /year|any|YEAR|ANY/i.test(k);
+  }) || 'YEAR';
+
+  rfRows = rfRows.filter(function(r) { return r._value !== null; })
+    .sort(function(a,b) { return String(a[yearKey]).localeCompare(String(b[yearKey])); });
+
+  var years  = rfRows.map(function(r) { return String(r[yearKey]); });
+  var values = rfRows.map(function(r) { return parseFloat(r._value); });
+
+  if (!years.length) { document.getElementById('chart-rfdb').innerHTML = '<p style="padding:20px;color:var(--ink-faint)">No s\'han trobat dades de RFDB.</p>'; return; }
+
+  var latest = values[values.length - 1];
+  var prev   = values[values.length - 2];
+  var delta  = ((latest - prev)/prev * 100).toFixed(1);
+
+  document.getElementById('kpi-rfdb').innerHTML =
+    kpiCard('RFDB/hab (' + years[years.length-1] + ')', fmt(latest) + ' €', (delta>0?'+':'')+delta+'%', delta > 0);
+
+  plotBar('chart-rfdb', [{
+    x: years, y: values,
+    type: 'bar',
+    marker: { color: values.map(function(v, i) {
+      return i === values.length - 1 ? CHART_PALETTE.olive : 'rgba(92,110,56,0.55)';
+    })},
+    hovertemplate: '%{x}: %{y:,.0f} €<extra></extra>'
+  }], {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any' },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Euros per habitant', tickformat: ',.0f' }
+  });
+}
+
+/* ── UTILS ── */
+function fmt(n) { return Math.round(n).toLocaleString('ca-ES'); }
+
+function kpiCard(label, value, delta, positive) {
+  var deltaHtml = '';
+  if (delta) {
+    var cls = positive === true ? 'pos' : positive === false ? 'neg' : '';
+    deltaHtml = '<div class="kpi-delta ' + cls + '">' + delta + '</div>';
+  }
+  return '<div class="kpi-card"><div class="kpi-label">' + label + '</div>'
+    + '<div class="kpi-value" style="font-size:22px;">' + value + '</div>'
+    + deltaHtml + '</div>';
+}
+
+/* ── INIT ── */
+async function init() {
+  try {
+    await Promise.all([loadPib(), loadAtur(), loadRfdb()]);
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = '';
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    var eb = document.getElementById('error-box');
+    eb.style.display = '';
+    eb.innerHTML = '<strong>Error en carregar les dades econòmiques</strong><br>' + e.message
+      + '<br><br><button class="btn-refresh" onclick="CACHE.clear();location.reload()">Tornar a intentar</button>';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

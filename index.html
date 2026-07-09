@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard Catalunya</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/components.css">
+</head>
+<body>
+
+<main class="main-content">
+  <div class="hero">
+    <p class="eyebrow">Catalunya · Quadre d'indicadors</p>
+    <h1>Dashboard Catalunya</h1>
+    <p class="hero-desc">Dades públiques sobre el país: meteorologia, economia, política i demografia. Tot accessible, tot obert.</p>
+    <p class="hero-date">Fonts: Idescat · Open-Meteo · Dades Obertes Generalitat</p>
+  </div>
+
+  <div class="cards-grid">
+    <a href="meteo.html" style="text-decoration:none;">
+      <div class="card accent-teal">
+        <div class="card-icon">🌡️</div>
+        <h3>Meteo</h3>
+        <p>Temperatura a Barcelona des de 1980. Tendència climàtica i rècords estacionals.</p>
+        <span class="card-link">Veure →</span>
+      </div>
+    </a>
+
+    <a href="economia.html" style="text-decoration:none;">
+      <div class="card accent-burnt">
+        <div class="card-icon">💰</div>
+        <h3>Economia</h3>
+        <p>PIB, taxa d'atur i renda familiar. Dades anuals i mensuals d'Idescat.</p>
+        <span class="card-link" style="color:var(--burnt)">Veure →</span>
+      </div>
+    </a>
+
+    <a href="politica.html" style="text-decoration:none;">
+      <div class="card">
+        <div class="card-icon">🏛️</div>
+        <h3>Política</h3>
+        <p>Resultats electorals al Parlament de Catalunya. Dades de totes les eleccions des de 1980.</p>
+        <span class="card-link">Veure →</span>
+      </div>
+    </a>
+
+    <a href="demografia.html" style="text-decoration:none;">
+      <div class="card accent-olive">
+        <div class="card-icon">👥</div>
+        <h3>Demografia</h3>
+        <p>Evolució de la població per comarca, sexe i lloc de naixement. Piràmide d'edat.</p>
+        <span class="card-link" style="color:var(--olive)">Veure →</span>
+      </div>
+    </a>
+
+    <a href="recursos.html" style="text-decoration:none;">
+      <div class="card accent-faint">
+        <div class="card-icon">🔗</div>
+        <h3>Recursos</h3>
+        <p>Enllaços a webs oficials, portals de dades obertes i serveis públics de Catalunya.</p>
+        <span class="card-link" style="color:var(--ink-faint)">Veure →</span>
+      </div>
+    </a>
+  </div>
+</main>
+
+<script src="js/cache.js"></script>
+<script src="js/nav.js"></script>
+<script>
+  renderNav('index');
+</script>
+</body>
+</html>

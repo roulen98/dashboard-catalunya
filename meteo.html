@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Meteo — Dashboard Catalunya</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/components.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+
+<main class="main-content">
+  <div class="page-header">
+    <p class="eyebrow">Barcelona · 1980–avui · Open-Meteo</p>
+    <h1 class="page-title">Meteo</h1>
+    <p class="page-desc">Temperatures diàries des de 1980. Comparativa entre anys, rècords estacionals i tendència climàtica.</p>
+  </div>
+
+  <div id="loading" class="loading-box">
+    <div class="spinner"></div>
+    <p>Carregant dades meteorològiques…</p>
+    <p style="font-size:12px;margin-top:6px;color:var(--ink-faint)">Primera càrrega: ~5 s · Càrregues posteriors: instantànies (caché 24h)</p>
+  </div>
+  <div id="error-box" class="error-box" style="display:none;"></div>
+
+  <div id="content" style="display:none;">
+
+    <div class="section">
+      <div class="section-header"><h2>Rècords estacionals</h2></div>
+      <div id="kpi-seasons" class="kpi-grid"></div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Temperatura màxima diària per anys</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-daily" style="height:380px;"></div>
+        <p class="chart-source">Font: Open-Meteo Archive API · Barcelona (41.39°N, 2.16°E)</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Temperatura mínima diària per anys</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-daily-min" style="height:380px;"></div>
+        <p class="chart-source">Font: Open-Meteo Archive API · Barcelona (41.39°N, 2.16°E)</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Tendència climàtica anual</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-trend" style="height:340px;"></div>
+        <p class="chart-source">Temperatura mitjana anual. La línia discontinua és la regressió lineal (1980–any anterior).</p>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<button class="btn-print" onclick="window.print()">Imprimir / PDF</button>
+
+<script src="js/cache.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/api.js"></script>
+<script>
+renderNav('meteo');
+
+var SEASONS = {
+  'Hivern':    { months: [12,1,2],  emoji: '❄️',  color: '#4C78A8' },
+  'Primavera': { months: [3,4,5],   emoji: '🌸',  color: '#5C6E38' },
+  'Estiu':     { months: [6,7,8],   emoji: '☀️',  color: '#B4541E' },
+  'Tardor':    { months: [9,10,11], emoji: '🍂',  color: '#8B6914' }
+};
+
+function getSeason(month) {
+  for (var name in SEASONS) {
+    if (SEASONS[name].months.indexOf(month) !== -1) return name;
+  }
+  return 'Hivern';
+}
+
+function processMeteo(raw) {
+  var today = new Date().toISOString().split('T')[0];
+  return raw.daily.time.reduce(function(acc, d, i) {
+    if (d > today) return acc;
+    var tMax = raw.daily.temperature_2m_max[i];
+    var tMin = raw.daily.temperature_2m_min[i];
+    var tMea = raw.daily.temperature_2m_mean[i];
+    if (tMea === null && tMax === null) return acc;
+    acc.push({
+      date: d,
+      year: parseInt(d.substring(0, 4)),
+      month: parseInt(d.substring(5, 7)),
+      tempMax: tMax,
+      tempMin: tMin,
+      tempMean: tMea
+    });
+    return acc;
+  }, []);
+}
+
+function renderSeasonKPIs(daily) {
+  var html = '';
+  Object.keys(SEASONS).forEach(function(name) {
+    var info = SEASONS[name];
+    var data = daily.filter(function(d) {
+      return info.months.indexOf(d.month) !== -1 && d.tempMax !== null && d.tempMin !== null;
+    });
+    if (!data.length) return;
+    var maxRec = data.reduce(function(b, d) { return d.tempMax > b.tempMax ? d : b; }, data[0]);
+    var minRec = data.reduce(function(b, d) { return d.tempMin < b.tempMin ? d : b; }, data[0]);
+
+    html += '<div class="kpi-card">';
+    html += '<div class="kpi-label">' + info.emoji + ' ' + name + '</div>';
+    html += '<div style="display:flex;gap:16px;margin-top:6px;">';
+    html += '<div><div class="kpi-value" style="font-size:22px;color:var(--burnt)">' + maxRec.tempMax.toFixed(1) + '°</div>';
+    html += '<div class="kpi-sub">Màx · ' + maxRec.date + '</div></div>';
+    html += '<div><div class="kpi-value" style="font-size:22px;color:var(--teal)">' + minRec.tempMin.toFixed(1) + '°</div>';
+    html += '<div class="kpi-sub">Mín · ' + minRec.date + '</div></div>';
+    html += '</div></div>';
+  });
+  document.getElementById('kpi-seasons').innerHTML = html;
+}
+
+function renderYearChart(daily) {
+  var currentYear = daily.reduce(function(m, d) { return Math.max(m, d.year); }, 0);
+  var years = [currentYear, currentYear-1, currentYear-5, currentYear-10, currentYear-20, currentYear-40];
+  var colors = ['#B4541E','#1E4A52','#5C6E38','#4C78A8','#B279A2','#736D5E'];
+
+  var traces = years.map(function(yr, i) {
+    var ydata = daily.filter(function(d) { return d.year === yr && d.tempMax !== null; });
+    return {
+      x: ydata.map(function(d) { return '2000-' + d.date.substring(5); }),
+      y: ydata.map(function(d) { return d.tempMax; }),
+      customdata: ydata.map(function(d) { return d.date; }),
+      name: String(yr),
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: colors[i], width: i === 0 ? 2.5 : 1.5, smoothing: 0.5 },
+      hovertemplate: '%{y:.1f}°C — %{customdata}<extra>' + yr + '</extra>'
+    };
+  });
+
+  plotLine('chart-daily', traces, {
+    xaxis: {
+      gridcolor: '#D6CFBC', linecolor: '#C7BFA8',
+      tickformat: '%b',
+      dtick: 'M1',
+      title: ''
+    },
+    yaxis: {
+      gridcolor: '#D6CFBC', linecolor: '#C7BFA8',
+      title: 'Temperatura màxima (°C)'
+    },
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 }
+  });
+}
+
+function renderYearChartMin(daily) {
+  var currentYear = daily.reduce(function(m, d) { return Math.max(m, d.year); }, 0);
+  var years = [currentYear, currentYear-1, currentYear-5, currentYear-10, currentYear-20, currentYear-40];
+  var colors = ['#B4541E','#1E4A52','#5C6E38','#4C78A8','#B279A2','#736D5E'];
+
+  var traces = years.map(function(yr, i) {
+    var ydata = daily.filter(function(d) { return d.year === yr && d.tempMin !== null; });
+    return {
+      x: ydata.map(function(d) { return '2000-' + d.date.substring(5); }),
+      y: ydata.map(function(d) { return d.tempMin; }),
+      customdata: ydata.map(function(d) { return d.date; }),
+      name: String(yr),
+      type: 'scatter',
+      mode: 'lines',
+      line: { color: colors[i], width: i === 0 ? 2.5 : 1.5, smoothing: 0.5 },
+      hovertemplate: '%{y:.1f}°C — %{customdata}<extra>' + yr + '</extra>'
+    };
+  });
+
+  plotLine('chart-daily-min', traces, {
+    xaxis: {
+      gridcolor: '#D6CFBC', linecolor: '#C7BFA8',
+      tickformat: '%b',
+      dtick: 'M1',
+      title: ''
+    },
+    yaxis: {
+      gridcolor: '#D6CFBC', linecolor: '#C7BFA8',
+      title: 'Temperatura mínima (°C)'
+    },
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 }
+  });
+}
+
+function renderTrendChart(daily) {
+  var prevYear = new Date().getFullYear() - 1;
+  var byYear = {};
+  daily.forEach(function(d) {
+    if (d.tempMean !== null && d.year <= prevYear) {
+      if (!byYear[d.year]) byYear[d.year] = [];
+      byYear[d.year].push(d.tempMean);
+    }
+  });
+
+  var annual = Object.keys(byYear).map(function(yr) {
+    var temps = byYear[yr];
+    return { year: parseInt(yr), mean: temps.reduce(function(a,b){return a+b;},0) / temps.length };
+  }).sort(function(a,b) { return a.year - b.year; });
+
+  var xs = annual.map(function(d) { return d.year; });
+  var ys = annual.map(function(d) { return d.mean; });
+  var reg = linearRegression(xs, ys);
+
+  var traces = [
+    {
+      x: xs, y: ys,
+      name: 'Temperatura mitjana',
+      type: 'scatter', mode: 'lines+markers',
+      line: { color: CHART_PALETTE.blue, width: 2 },
+      marker: { size: 4, color: CHART_PALETTE.blue },
+      hovertemplate: '%{y:.2f}°C<extra>Mitjana anual</extra>'
+    },
+    {
+      x: xs, y: xs.map(function(x) { return reg.predict(x); }),
+      name: 'Tendència lineal',
+      type: 'scatter', mode: 'lines',
+      line: { color: CHART_PALETTE.burnt, dash: 'dash', width: 2 },
+      hovertemplate: '%{y:.2f}°C<extra>Tendència</extra>'
+    }
+  ];
+
+  var slopeStr = (reg.slope * 10).toFixed(2);
+  plotLine('chart-trend', traces, {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any' },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Temperatura (°C)' },
+    annotations: [{
+      xref: 'paper', yref: 'paper', x: 0.01, y: 0.97, xanchor: 'left',
+      text: '+' + slopeStr + '°C per dècada',
+      font: { size: 12, color: CHART_PALETTE.burnt },
+      showarrow: false,
+      bgcolor: 'rgba(244,240,230,0.85)',
+      borderpad: 4
+    }]
+  });
+}
+
+async function init() {
+  try {
+    var result = await API.meteo();
+    var daily = processMeteo(result.data);
+
+    renderSeasonKPIs(daily);
+    renderYearChart(daily);
+    renderYearChartMin(daily);
+    renderTrendChart(daily);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display  = '';
+
+    if (result.fromCache) {
+      var note = document.createElement('p');
+      note.style.cssText = 'font-size:11px;color:var(--ink-faint);margin-bottom:12px;';
+      note.textContent = '✓ Dades de la caché local (s\'actualitzen cada 24h)';
+      document.getElementById('content').prepend(note);
+    }
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    var eb = document.getElementById('error-box');
+    eb.style.display = '';
+    eb.innerHTML = '<strong>Error en carregar les dades meteorològiques</strong><br>' + e.message
+      + '<br><br><button class="btn-refresh" onclick="CACHE.clear(\'meteo_bcn\');location.reload()">Tornar a intentar</button>';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Demografia — Dashboard Catalunya</title>
+  <link rel="stylesheet" href="css/tokens.css">
+  <link rel="stylesheet" href="css/components.css">
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+
+<main class="main-content">
+  <div class="page-header">
+    <p class="eyebrow">Catalunya · Cens de població · Idescat</p>
+    <h1 class="page-title">Demografia</h1>
+    <p class="page-desc">Evolució de la població de Catalunya per comarca, sexe i lloc de naixement. Piràmide d'edat.</p>
+  </div>
+
+  <div id="loading" class="loading-box">
+    <div class="spinner"></div>
+    <p>Carregant dades demogràfiques…</p>
+  </div>
+  <div id="error-box" class="error-box" style="display:none;"></div>
+
+  <div id="content" style="display:none;">
+
+    <div class="filter-bar">
+      <div class="filter-group">
+        <label>Comarca</label>
+        <select id="sel-comarca" onchange="applyFilters()"></select>
+      </div>
+      <button class="btn-refresh" onclick="CACHE.clear('idescat_census');CACHE.clear('idescat_pyramid');location.reload()">↻ Actualitzar dades</button>
+    </div>
+
+    <div id="kpi-demo" class="kpi-grid"></div>
+    <hr class="divider">
+
+    <div class="section">
+      <div class="section-header"><h2>Evolució de la població total</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-total" style="height:320px;"></div>
+        <p class="chart-source">Font: Idescat · Cens de població INE 2021–2025</p>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Homes i dones</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-sexe" style="height:320px;"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2>Per lloc de naixement</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-origen" style="height:320px;"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header"><h2 id="pyramid-title">Piràmide de població per edat i sexe</h2></div>
+      <div class="chart-wrap">
+        <div id="chart-piramide" style="height:700px;"></div>
+        <p class="chart-source">Font: Idescat · Estimació de la població de Catalunya (darrer semestre disponible)</p>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<button class="btn-print" onclick="window.print()">Imprimir / PDF</button>
+
+<script src="js/cache.js"></script>
+<script src="js/nav.js"></script>
+<script src="js/charts.js"></script>
+<script src="js/api.js"></script>
+<script>
+renderNav('demografia');
+
+var ALL_ROWS = [];
+var COMARCA_LIST = [];
+
+/* ── PARSE CENSUS ── */
+function parseCensus(raw) {
+  var rows = parseJsonStat(raw);
+  rows = rows.filter(function(r) { return r._value !== null; });
+
+  // Normalise column names
+  var sample = rows[0] || {};
+  var keyMap = {};
+  Object.keys(sample).forEach(function(k) {
+    var kl = k.toLowerCase();
+    if (kl === 'year' || kl === 'any') keyMap[k] = 'any';
+    else if (kl === 'com' || kl === 'comarca') keyMap[k] = 'comarca';
+    else if (kl === 'sex' || kl === 'sexe') keyMap[k] = 'sexe';
+    else if (kl === 'pbirth' || kl === 'nbirth' || kl === 'lloc_naixement') keyMap[k] = 'lloc';
+    else if (kl === 'concept' || kl === 'concepte') keyMap[k] = 'concepte';
+  });
+
+  return rows.map(function(r) {
+    var n = { poblacio: parseFloat(r._value) };
+    Object.keys(r).filter(function(k) { return k !== '_value'; }).forEach(function(k) {
+      n[keyMap[k] || k] = r[k];
+    });
+    return n;
+  }).filter(function(r) { return !isNaN(r.poblacio); });
+}
+
+/* ── FILTER HELPERS ── */
+function byYear(data, comarca, sexe, lloc) {
+  return data.filter(function(r) {
+    return (!comarca || r.comarca === comarca) &&
+           (!sexe   || !r.sexe  || r.sexe.toLowerCase()  === sexe.toLowerCase()) &&
+           (!lloc   || !r.lloc  || r.lloc.toLowerCase()  === lloc.toLowerCase());
+  }).reduce(function(acc, r) {
+    var yr = String(r.any || r.YEAR || r.year);
+    if (!acc[yr]) acc[yr] = 0;
+    acc[yr] += r.poblacio;
+    return acc;
+  }, {});
+}
+
+/* ── RENDER ── */
+function applyFilters() {
+  if (!ALL_ROWS.length) return;
+  var comarca = document.getElementById('sel-comarca').value;
+  renderDemo(ALL_ROWS, comarca);
+}
+
+function renderDemo(rows, comarca) {
+  var totalMap  = byYear(rows, comarca, 'total', 'total');
+  var homesMap  = byYear(rows, comarca, 'homes', 'total');
+  var donesMap  = byYear(rows, comarca, 'dones', 'total');
+  var catMap    = byYear(rows, comarca, 'total', 'Catalunya');
+  var espMap    = byYear(rows, comarca, 'total', "resta d'Espanya");
+  var estrMap   = byYear(rows, comarca, 'total', 'estranger');
+
+  var years = Object.keys(totalMap).sort();
+  if (!years.length) return;
+
+  var latestYr = years[years.length - 1];
+  var prevYr   = years[years.length - 2];
+  var latest   = totalMap[latestYr] || 0;
+  var prev     = totalMap[prevYr]   || 0;
+  var delta    = latest - prev;
+  var deltaStr = (delta >= 0 ? '+' : '') + Math.round(delta).toLocaleString('ca-ES');
+
+  document.getElementById('kpi-demo').innerHTML =
+    kpi('Població total (' + latestYr + ')', Math.round(latest).toLocaleString('ca-ES'), deltaStr, delta >= 0) +
+    kpi('Homes (' + latestYr + ')', Math.round(homesMap[latestYr]||0).toLocaleString('ca-ES'), '', null) +
+    kpi('Dones (' + latestYr + ')', Math.round(donesMap[latestYr]||0).toLocaleString('ca-ES'), '', null);
+
+  /* Chart 1: Total */
+  var tot = years.map(function(y) { return totalMap[y] || 0; });
+  plotArea('chart-total', [{
+    x: years, y: tot,
+    type: 'scatter', mode: 'lines+markers', fill: 'tozeroy',
+    line: { color: CHART_PALETTE.teal, width: 2.5 },
+    fillcolor: 'rgba(30,74,82,0.12)',
+    marker: { size: 5 },
+    hovertemplate: '%{x}: %{y:,.0f}<extra></extra>'
+  }], {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any', tickmode: 'linear', dtick: 1 },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', tickformat: ',.0f' }
+  });
+
+  /* Chart 2: Sexe */
+  plotLine('chart-sexe', [
+    { x: years, y: years.map(function(y){return homesMap[y]||0;}), name: 'Homes',
+      type: 'scatter', mode: 'lines+markers', line: { color: CHART_PALETTE.blue, width: 2 }, marker: { size: 5 },
+      hovertemplate: '%{x}: %{y:,.0f}<extra>Homes</extra>' },
+    { x: years, y: years.map(function(y){return donesMap[y]||0;}), name: 'Dones',
+      type: 'scatter', mode: 'lines+markers', line: { color: CHART_PALETTE.red, width: 2 }, marker: { size: 5 },
+      hovertemplate: '%{x}: %{y:,.0f}<extra>Dones</extra>' }
+  ], {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any', tickmode: 'linear', dtick: 1 },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', tickformat: ',.0f' },
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 }
+  });
+
+  /* Chart 3: Origen */
+  plotLine('chart-origen', [
+    { x: years, y: years.map(function(y){return catMap[y]||0;}),  name: 'Nats a Catalunya',
+      type:'scatter',mode:'lines+markers',line:{color:CHART_PALETTE.olive,width:2},marker:{size:5},
+      hovertemplate:'%{x}: %{y:,.0f}<extra>Nats a Catalunya</extra>' },
+    { x: years, y: years.map(function(y){return espMap[y]||0;}),  name: "Resta d'Espanya",
+      type:'scatter',mode:'lines+markers',line:{color:CHART_PALETTE.orange,width:2},marker:{size:5},
+      hovertemplate:'%{x}: %{y:,.0f}<extra>Resta Espanya</extra>' },
+    { x: years, y: years.map(function(y){return estrMap[y]||0;}), name: 'Estranger',
+      type:'scatter',mode:'lines+markers',line:{color:CHART_PALETTE.purple,width:2},marker:{size:5},
+      hovertemplate:'%{x}: %{y:,.0f}<extra>Estranger</extra>' }
+  ], {
+    xaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', title: 'Any', tickmode: 'linear', dtick: 1 },
+    yaxis: { gridcolor: '#D6CFBC', linecolor: '#C7BFA8', tickformat: ',.0f' },
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.02, xanchor: 'right', x: 1 }
+  });
+}
+
+function kpi(label, value, delta, positive) {
+  var dHtml = '';
+  if (delta) {
+    var cls = positive === true ? 'pos' : positive === false ? 'neg' : '';
+    dHtml = '<div class="kpi-delta ' + cls + '">' + delta + '</div>';
+  }
+  return '<div class="kpi-card"><div class="kpi-label">' + label + '</div>'
+    + '<div class="kpi-value" style="font-size:22px;">' + value + '</div>'
+    + dHtml + '</div>';
+}
+
+/* ── PYRAMID ── */
+function renderPyramid(raw) {
+  var rows = parseJsonStat(raw);
+  rows = rows.filter(function(r) { return r._value !== null; });
+
+  // Find dimension keys
+  var sample = rows[0] || {};
+  var semKey = Object.keys(sample).find(function(k) { return /sem/i.test(k); });
+  var ageKey = Object.keys(sample).find(function(k) { return /age|edat/i.test(k); });
+  var sexKey = Object.keys(sample).find(function(k) { return /sex/i.test(k); });
+
+  if (!semKey || !ageKey || !sexKey) return;
+
+  // Latest semester
+  var sems = [...new Set(rows.map(function(r) { return r[semKey]; }))].sort();
+  var latest = sems[sems.length - 1];
+  document.getElementById('pyramid-title').textContent = 'Piràmide de població — ' + latest;
+
+  rows = rows.filter(function(r) { return r[semKey] === latest; });
+
+  function parseAge(label) {
+    if (!label) return -1;
+    if (String(label).includes('100')) return 100;
+    var m = String(label).match(/\d+/);
+    return m ? parseInt(m[0]) : -1;
+  }
+
+  var homesRows = rows.filter(function(r) { return r[sexKey] && r[sexKey].toLowerCase() === 'homes' && parseAge(r[ageKey]) >= 0; });
+  var donesRows = rows.filter(function(r) { return r[sexKey] && r[sexKey].toLowerCase() === 'dones' && parseAge(r[ageKey]) >= 0; });
+
+  homesRows.sort(function(a,b) { return parseAge(a[ageKey]) - parseAge(b[ageKey]); });
+  donesRows.sort(function(a,b) { return parseAge(a[ageKey]) - parseAge(b[ageKey]); });
+
+  var ages  = homesRows.map(function(r) { return r[ageKey]; });
+  var homes = homesRows.map(function(r) { return parseFloat(r._value); });
+  var dones = donesRows.map(function(r) { return parseFloat(r._value); });
+
+  var maxVal = Math.max(Math.max.apply(null, homes), Math.max.apply(null, dones));
+  var tickStep = maxVal > 100000 ? 50000 : maxVal > 20000 ? 20000 : 10000;
+  var tickRange = Math.ceil(maxVal * 1.1 / tickStep) * tickStep;
+  var tickVals = [];
+  for (var v = -tickRange; v <= tickRange; v += tickStep) tickVals.push(v);
+
+  Plotly.newPlot('chart-piramide', [
+    {
+      y: ages, x: homes.map(function(v) { return -v; }),
+      name: 'Homes', type: 'bar', orientation: 'h',
+      marker: { color: CHART_PALETTE.blue },
+      customdata: homes,
+      hovertemplate: '%{customdata:,.0f}<extra>Homes</extra>'
+    },
+    {
+      y: ages, x: dones,
+      name: 'Dones', type: 'bar', orientation: 'h',
+      marker: { color: CHART_PALETTE.red },
+      hovertemplate: '%{x:,.0f}<extra>Dones</extra>'
+    }
+  ], Object.assign(baseLayout({
+    barmode: 'relative',
+    height: 700,
+    margin: { t: 20, b: 40, l: 70, r: 20 },
+    xaxis: {
+      gridcolor: '#D6CFBC', linecolor: '#C7BFA8',
+      tickvals: tickVals,
+      ticktext: tickVals.map(function(v) { return (Math.abs(v)/1000).toFixed(0) + 'k'; }),
+      title: 'Població'
+    },
+    yaxis: {
+      gridcolor: '#D6CFBC',
+      tickmode: 'array',
+      tickvals: ages.filter(function(_,i){ return i % 5 === 0; }),
+      title: 'Edat'
+    },
+    legend: { orientation: 'h', yanchor: 'bottom', y: 1.01, xanchor: 'right', x: 1 },
+    bargap: 0.05
+  })), { responsive: true, displayModeBar: false });
+}
+
+/* ── INIT ── */
+async function init() {
+  try {
+    var [censusRes, pyrRes] = await Promise.all([API.census(), API.pyramid()]);
+
+    ALL_ROWS = parseCensus(censusRes.data);
+
+    var comarques = [...new Set(ALL_ROWS.map(function(r) { return r.comarca; }))].filter(Boolean).sort();
+    COMARCA_LIST = comarques;
+
+    var sel = document.getElementById('sel-comarca');
+    comarques.forEach(function(c) {
+      var opt = document.createElement('option');
+      opt.value = c;
+      opt.textContent = c;
+      if (c === 'Catalunya') opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+    var comarca = comarques.indexOf('Catalunya') !== -1 ? 'Catalunya' : comarques[0];
+    sel.value = comarca;
+    renderDemo(ALL_ROWS, comarca);
+    renderPyramid(pyrRes.data);
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('content').style.display = '';
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    var eb = document.getElementById('error-box');
+    eb.style.display = '';
+    eb.innerHTML = '<strong>Error en carregar les dades demogràfiques</strong><br>' + e.message
+      + '<br><br><button class="btn-refresh" onclick="CACHE.clear();location.reload()">Tornar a intentar</button>';
+  }
+}
+
+init();
+</script>
+</body>
+</html>

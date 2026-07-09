@@ -305,6 +305,45 @@
 }
 .btn-refresh:hover { background: var(--line); }
 
+/* ── EXTERNAL LINKS SECTION (index) ── */
+.external-links-section {
+  margin-top: 50px;
+  border-top: 2px solid var(--ink);
+  padding-top: 34px;
+}
+.external-links-section h2 {
+  color: var(--teal);
+  margin-bottom: 18px;
+}
+.ext-links-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ext-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  background: var(--paper-2);
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--burnt);
+  border-radius: 0 9px 9px 0;
+  padding: 14px 18px;
+  text-decoration: none;
+  color: var(--ink);
+  transition: background 0.15s, border-left-color 0.15s;
+}
+.ext-card:hover {
+  background: var(--paper-3);
+  border-left-color: var(--teal);
+  text-decoration: none;
+}
+.ext-icon { font-size: 22px; flex-shrink: 0; }
+.ext-card div { flex: 1; }
+.ext-card strong { font-size: 14px; font-weight: 600; color: var(--teal); display: block; margin-bottom: 2px; }
+.ext-card p { font-size: 13px; color: var(--ink-soft); margin: 0; }
+.ext-arrow { font-size: 16px; color: var(--ink-faint); flex-shrink: 0; }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 700px) {
   .main-content { padding: 20px 16px 60px; }
